@@ -1,0 +1,8 @@
+[package]
+name = "voip-doorbell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rvoip-sip = "0.2.5"
+tokio = "1.52.3"
