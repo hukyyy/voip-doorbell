@@ -1,9 +1,15 @@
 use std::{net, time::Duration};
 
-use rvoip_sip::{EndpointAudioSender, Endpoint, EndpointAudioFrame, EndpointProfile};
+use rvoip_sip::{
+    Endpoint, EndpointAudioFrame, EndpointAudioSender, EndpointProfile,
+    Event::{self, DtmfReceived},
+};
 use tokio::time::interval;
 
-async fn play_wav_into_call(tx: EndpointAudioSender, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn play_wav_into_call(
+    tx: EndpointAudioSender,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = hound::WavReader::open(path)?;
     let spec = reader.spec();
 
@@ -11,7 +17,11 @@ async fn play_wav_into_call(tx: EndpointAudioSender, path: &str) -> Result<(), B
         return Err("WAV must be 16-bit PCM for this example".into());
     }
     if spec.sample_rate != 8000 {
-        return Err(format!("WAV must be 8kHz (got {}Hz) — resample first", spec.sample_rate).into());
+        return Err(format!(
+            "WAV must be 8kHz (got {}Hz) — resample first",
+            spec.sample_rate
+        )
+        .into());
     }
 
     let sample_rate = spec.sample_rate as usize;
@@ -67,13 +77,11 @@ async fn play_wav_into_call(tx: EndpointAudioSender, path: &str) -> Result<(), B
     Ok(())
 }
 
-
 #[tokio::main]
-async fn main() -> rvoip_sip::Result<()> {
-
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SETUP //////////////////////////////////////
 
-    let bind_addr: net::SocketAddr = "192.168.129.60:5070".parse().unwrap();
+    let bind_addr: net::SocketAddr = "192.168.0.231:5070".parse().unwrap();
     let doorbell = Endpoint::builder()
         .name("doorbell")
         .bind_addr(bind_addr)
@@ -84,36 +92,42 @@ async fn main() -> rvoip_sip::Result<()> {
 
     // CALLING TARGET /////////////////////////////
 
-    let target = "sip:elliot@192.168.129.12:5060";
+    let target = "sip:100@192.168.0.134:5060";
     let call = doorbell
-        .call_and_wait(target, Some(Duration::from_secs(10)))
+        .call_and_wait(target, Some(Duration::from_secs(20)))
         .await?;
     println!("[doorbell] connected as {}", call.id());
 
     // SENDING WAVEFORM ///////////////////////////
 
     let audio_handle = call.audio().await?;
-    let (tx, _) = audio_handle.split();
+    let (tx, _rx) = audio_handle.split();
+    // Do not drop _rx to be able to detect DTMF tones.
 
-    if let Err(e) = play_wav_into_call(tx, "res/test.wav").await {
-        eprintln!("playback error: {:?}", e);
-    }
+    let call_events = call.clone();
+    let dtmf_task = tokio::spawn(async move {
+        if let Ok(mut event_rx) = call_events.as_session_handle().events().await {
+            while let Some(ev) = event_rx.next().await {
+                if let Event::DtmfReceived { digit, .. } = ev {
+                    println!("[doorbell] RECEIVED DTMF: {digit}");
+                    if digit == '#' {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 
-    // SENDING DTMF SIGNALS ///////////////////////
+    // play music, then STAY on the call so you can press keys on the PAP2 handset
+    tokio::spawn(async move {
+        let _ = play_wav_into_call(tx, "res/test.wav").await;
+    });
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    call.send_dtmf('1').await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    call.send_dtmf('2').await?;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    call.send_dtmf('*').await?;
-
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // SHUTDOWN ///////////////////////////////////
+    println!("[doorbell] call is up — press keys on the PAP2 handset now");
+    dtmf_task.await?; // Wait for # press.
+    println!("[doorbell] Shutting down.");
 
     call.hangup_and_wait(None).await?;
-
     doorbell.shutdown().await?;
 
     Ok(())
