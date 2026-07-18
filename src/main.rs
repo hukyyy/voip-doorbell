@@ -1,5 +1,6 @@
 use std::{net, time::Duration};
 
+use rvoip_audio_device::DeviceBridge;
 use rvoip_sip::{Endpoint, EndpointProfile, Event};
 use voip_doorbell::play_wav_into_call;
 
@@ -29,8 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // SENDING WAVEFORM ///////////////////////////
 
-    let audio_handle = call.audio().await?;
-    let (tx, _rx) = audio_handle.split();
+    let audio_stream = call.as_session_handle().audio().await?;
+    let _audio_attachment = DeviceBridge::attach_default(audio_stream);
+
+    // let audio_handle = call.audio().await?;
+    // let (tx, _rx) = audio_handle.split();
     // Do not drop _rx to be able to detect DTMF tones.
 
     let call_events = call.clone();
@@ -48,9 +52,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // play music, then STAY on the call so you can press keys on the PAP2 handset
-    tokio::spawn(async move {
-        let _ = play_wav_into_call(tx, "res/test.wav").await;
-    });
+    // tokio::spawn(async move {
+    //     let _ = play_wav_into_call(tx, "res/test.wav").await;
+    // });
 
     println!("[doorbell] call is up — press keys on the PAP2 handset now");
     dtmf_task.await?; // Wait for # press.
