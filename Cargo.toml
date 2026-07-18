@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dotenv = "0.15.0"
 hound = "3.5.1"
 rand = "0.10.2"
 rvoip-sip = "0.2.5"

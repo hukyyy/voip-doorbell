@@ -5,9 +5,13 @@ use voip_doorbell::play_wav_into_call;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv::dotenv().ok();
+    let doorbell_addr = std::env::var("DOORBELL_IP").expect("Please define DOORBELL_IP");
+    let gateway_target = std::env::var("GATEWAY_TARGET").expect("Please define GATEWAY_TARGET");
+
     // SETUP //////////////////////////////////////
 
-    let bind_addr: net::SocketAddr = "192.168.0.231:5070".parse().unwrap();
+    let bind_addr: net::SocketAddr = doorbell_addr.parse().unwrap();
     let doorbell = Endpoint::builder()
         .name("doorbell")
         .bind_addr(bind_addr)
@@ -18,9 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // CALLING TARGET /////////////////////////////
 
-    let target = "sip:100@192.168.0.134:5060";
     let call = doorbell
-        .call_and_wait(target, Some(Duration::from_secs(20)))
+        .call_and_wait(&gateway_target, Some(Duration::from_secs(20)))
         .await?;
     println!("[doorbell] connected as {}", call.id());
 
